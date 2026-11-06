@@ -384,6 +384,48 @@ def cmd_show(a):
             print(f"    原文：{r['quote']}")
 
 
+def _fact_source_block(c, fid):
+    """把一条记录摊成「我记的 / 原文 / 出处」。不存在返回 False。"""
+    r = c.execute('SELECT * FROM facts WHERE id=?', (fid,)).fetchone()
+    if not r:
+        return False
+    flag = '  [作废]' if r['retracted'] else ''
+    print(f"  [{r['id']}] {r['day']}  {LEVEL_NAMES.get(r['weight'], r['weight'])}{flag}")
+    print(f"        我记的：{r['text']}")
+    if r['quote']:
+        print(f"        原  文：{r['quote']}")
+    else:
+        print("        原  文：（没存——这条只有我的概括）")
+    if r['source']:
+        print(f"        出  处：{r['source']}")
+    return True
+
+
+def cmd_quote(a):
+    """开口前回查：把一条记忆（或一条记录）挂的原话摊开。
+
+    这是「总结只是索引、不是依据」那一步的落点：要替别人转述之前先调它，
+    看到原文再开口；原文撑不住那句话，就把话说轻，或者不说。
+    """
+    c = conn()
+    ids = [int(x) for x in str(a.ids).replace('，', ',').split(',') if x.strip()]
+    for i in ids:
+        m = c.execute('SELECT * FROM memories WHERE id=?', (i,)).fetchone()
+        if m:
+            print(f"记忆 #{m['id']}（{state_name(m['state'])}）{m['text']}")
+            fids = [x[0] for x in c.execute(
+                'SELECT fact_id FROM memory_facts WHERE memory_id=? ORDER BY fact_id', (m['id'],))]
+            if not fids:
+                print('  这条没挂记录——它没有出处，别当依据用')
+                continue
+            print(f'  挂着 {len(fids)} 条记录：')
+            for fid in fids:
+                _fact_source_block(c, fid)
+            continue
+        if not _fact_source_block(c, i):
+            print(f'（#{i} 在记忆和记录里都没有）')
+
+
 def cmd_words(a):
     print('词表（只能从这里挑，1-3 个）：')
     print('  ' + '  '.join(WORDS))
@@ -1522,6 +1564,9 @@ x.add_argument('date', nargs='?', default=None)
 x = sub.add_parser('show', help='只输出记录原文（给旁听者看）')
 x.add_argument('ids')
 
+x = sub.add_parser('quote', help='开口前回查：摊开一条记忆（或记录）挂的原话')
+x.add_argument('ids', help='记忆编号或记录编号，逗号分隔')
+
 sub.add_parser('words', help='打印词表')
 
 x = sub.add_parser('recall', help='按关键词翻')
@@ -1631,7 +1676,7 @@ if getattr(a, 'db', None):
     SNAP_DIR = os.path.join(os.path.dirname(os.path.abspath(DB)), 'snapshots')
     if not os.path.exists(DB) and not getattr(a, 'create', False):
         sys.exit(f'没有这个库：{DB}\n  路径写错了吗？真要新建一个空库，加 --create。')
-{'fact': cmd_fact, 'day': cmd_day, 'show': cmd_show, 'words': cmd_words, 'recall': cmd_recall,
+{'fact': cmd_fact, 'day': cmd_day, 'show': cmd_show, 'quote': cmd_quote, 'words': cmd_words, 'recall': cmd_recall,
  'retract': cmd_retract, 'verify': cmd_verify, 'memory': cmd_memory, 'witness': cmd_witness,
  'stats': cmd_stats, 'supplement': cmd_supplement, 'coord': set_coord, 'reword': cmd_reword, 'merge': cmd_merge, 'merges': cmd_merges, 'backup': cmd_backup, 'backups': cmd_backups, 'suggest': cmd_suggest, 'snapshot': cmd_snapshot, 'snapshots': cmd_snapshots, 'diff': cmd_diff, 'wish': cmd_wish, 'wishes': cmd_wishes, 'load': cmd_load, 'touch': cmd_touch,
  'rebuild': cmd_rebuild, 'feelings': cmd_feelings, 'persona': cmd_persona, 'mems': cmd_mems, 'character': cmd_character, 'mood': cmd_mood, 'voice': cmd_voice, 'export': cmd_export, 'recheck': cmd_recheck, 'dissent': cmd_dissent}[a.cmd](a)

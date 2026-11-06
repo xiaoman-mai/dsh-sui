@@ -20,3 +20,10 @@ snapshots/
 # 编辑器
 .vscode/
 .idea/
+
+# Python 运行产物
+__pycache__/
+*.pyc
+
+# 运行态：哪些「没认领的词」已经提示过，是本机状态，不跟着代码走
+lib/.dissent-shown.json
