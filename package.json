@@ -8,7 +8,9 @@
     "dsh",
     "dsh-plugin",
     "memory",
-    "act-r"
+    "act-r",
+    "agent-memory",
+    "spaced-repetition"
   ],
   "main": "lib/index.mjs",
   "exports": {
@@ -23,7 +25,10 @@
     "lib/client.js",
     "cordis.patch.yml",
     "locale/*.json",
-    "icon.svg"
+    "icon.svg",
+    "lib/sui.py",
+    "test/*.mjs",
+    "test/*.py"
   ],
   "dsh": {
     "bundle": {
