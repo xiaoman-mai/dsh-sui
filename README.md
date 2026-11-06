@@ -1,0 +1,129 @@
+# dsh-sui ·「穗」
+
+三层记忆：**记录 / 记忆 / 感觉**。挂着 DSH 的一个插件，带 30 个工具、每轮自动想起、一个看人格的面板。
+
+设计文档在 `tools/sui/README.md`（三层的规矩、理论依据、还缺什么都在那儿）。这里说的是插件本身怎么装、怎么用、哪里会坏。
+
+## 它解决什么
+
+模型没有跨会话的记性。把记忆塞进系统提示，塞多少都是死的：不会淡、不会因为复习变牢、也不会跟自己吵架。
+
+这套东西的办法是让记忆**有账**：
+
+- 每条记忆挂一串证据（原始记录），不是凭空一句话；
+- 每条记忆挂几片感觉，感觉只有**两个独立提炼者都挑中**才进人格；
+- 活跃度按 ACT-R 的基础激活算，复习过的不容易淡；
+- 人格不是标签，是从这些撞击里长出来的形状。
+
+## 层
+
+| 层 | 回答什么 | 表 |
+|---|---|---|
+| 记录 | 发生过什么 | `facts` |
+| 记忆 | 我信什么 | `memories` + `memory_facts` |
+| 感觉 | 那是什么滋味 | `feelings` + `memory_feelings` + `feeling_hits` |
+
+之上还有三样东西，都是算出来的，不单独存：
+
+- **性格**：撞得多、跨得久的词（`sui_character`）
+- **情绪**：最近几天在撞的词（`sui_mood`）
+- **语气**：把上面两个翻成「现在该怎么说话」（`sui_voice`）
+
+## 装
+
+包自带 bundle patch，会被 Loader 自动插入。在 profile 的 `cordis.patch.yml` 里**不要**再写一条同 id 的 `insert`，会撞 duplicate id。
+
+要改配置就写同 id 的顶行覆盖：
+
+```yaml
+- id: sui
+  name: dsh-sui
+  config:
+    workspace: 'D:/Users/张锴/Documents/deepseek-harness/default-workspace'
+    python: 'C:/Users/张锴/.dsh/dsh-runtimes/dsh-primary-runtime/dependencies/python/python.exe'
+    presets:
+      - daughter-agent
+      - standard
+    scopeWorkspaces:
+      - 'D:/Users/张锴/Documents/deepseek-harness/default-workspace'
+```
+
+| 配置 | 意思 |
+|---|---|
+| `workspace` | 工作区根。库在 `<workspace>/tools/sui/sui.db` |
+| `python` | 跑 `sui.py` 的解释器。不填会去读 `DSH_sui_PYTHON` |
+| `presets` | 只在这些预设的会话里自动想起；空 = 只认 `daughter-agent` |
+| `scopeWorkspaces` | 只在这些工作区里生效；空 = 不限 |
+
+改配置要重启宿主才生效。
+
+## 工具
+
+**写**
+
+`sui_fact` 记一条 ｜ `sui_memory` 提炼一条 ｜ `sui_witness` 交接旁听的词 ｜ `sui_supplement` 给旧记忆补证据 ｜ `sui_coord` 补七情六欲坐标 ｜ `sui_verify` 盖查证戳 ｜ `sui_retract` 作废 ｜ `sui_reword` 拆词 ｜ `sui_merge` 归并两个词 ｜ `sui_wish` 小路留言
+
+**读**
+
+`sui_load` 现在该想起的（**顺带记一笔加载**）｜ `sui_recall` 按词翻 ｜ `sui_day` 某天 ｜ `sui_mems` 最近记忆 ｜ `sui_dissent` 它挑过我没认的词 ｜ `sui_feelings` 词权重 ｜ `sui_persona` 人格形状 ｜ `sui_character` 性格 ｜ `sui_mood` 情绪 ｜ `sui_voice` 语气 ｜ `sui_words` 锚 ｜ `sui_merges` 归并表 ｜ `sui_suggest` 归并线索 ｜ `sui_wishes` 小路 ｜ `sui_touch` 手动标记加载
+
+**管**
+
+`sui_snapshot` 存档 ｜ `sui_snapshots` 看存档 ｜ `sui_diff` 和上一份比 ｜ `sui_rebuild` 重算权重 ｜ `sui_backup` 备份库
+
+## 自动的三件事
+
+**每轮想起**：会话挂上之后，插件每分钟把「现在该想起的」和「此刻的语气」缓存好，每一步拼进提示末尾（`systemPrompt.context`，不动前缀缓存）。用户这句话里的双字能对上某条记忆的字面时，优先注入那几条；一条都不沾边就退回活跃度最高的三条。
+
+**自动落盘**：上下文到 `pressureMid` 提醒一句该记了，到 `pressureHigh` 自动把最近的用户原话落成记录（只存原话，不提炼）。游标防重复。
+
+**异议上桌**：每次刷新顺手跑一句 `dissent --brief`，把「旁听挑过、我一次没认领」的词带进注入。只收两边都同意的话，久了就是回音壁——刺耳的那部分得每轮在眼前过一下，而不是躺在库里等人想起。
+
+一次只报最重的那一个（现在库里 125 个词，绝大多数只出现一次）。全铺开会把注入撑满，看多了也会麻。等「观察名单」自己长出来，再考虑分级。
+
+## 旁听怎么做（别自证）
+
+记忆写完是「等旁听」。旁听不是走过场：**同一支模型自己挑一遍，等于自己给自己盖章**，账面上会记成 `same-context`。
+
+对的流程：
+
+1. 导出待对账的原文（含证据，别带自己的词）：`sui export --out pending.txt`；
+2. 交给**另一个上下文**去挑——最好是另一支模型。DSH 里用子代理，指定别的 `provider/model`；
+3. 只给它原文，不给它你挑的词。要它**连坐标一起给**（七情一格 + 六欲一条）；
+4. 拿回来用 `sui witness <id> --feel 词1,词2 --coords "词1:喜/耳,词2:思/生" --by "旁听:<模型名>"` 回填，`--by` 一定要写；
+5. 对账有三条通路，任一成立就算对上：**同一个词**、**同一个归并类**、**七情和六欲都落在同一格**。第三条是给「措辞不同、讲的是同一种滋味」留的口子。光比七情不行——「喜」占了三成七，那样一半都会被判成一样，所以情和欲必须都有、都对上；
+6. 还是撞不上就认了。真同义才 `sui_merge a b --note "为什么算一类"`，**不要为了凑交集而归并**——那是把对账变形式。
+
+查账：`sui_mems` 每条会打「旁听来自 xxx」。空着或 `same-context` 的就是漏洞。
+
+## 面板
+
+侧栏一个「穗」，四个页签：人格（七情+六欲柱状）、记忆、存档、参数。参数改动写 `tools/sui/settings.json`，一分钟内生效；衰减类的改完要跑一次 `sui_rebuild`。
+
+## 调参
+
+| 名字 | 默认 | 意思 |
+|---|---|---|
+| `pressureMid` / `pressureHigh` | 55 / 75 | 上下文到几成提醒 / 自动落盘 |
+| `recallItems` / `voiceItems` | 3 / 3 | 每轮注入几条记忆、几个语气词 |
+| `maxChars` | 700 | 注入字数上限 |
+| `autoRecordBatch` | 6 | 一次最多落几条 |
+| `decayThreshold` | 0.2 | 活跃度低于它就淡出 |
+| `loadWindowDays` | 30 | 只在最近这些天里找 |
+| `decayPower` | 0.5 | ACT-R 的 d |
+
+## 测试
+
+```bash
+# 数据层：临时库，不碰 sui.db
+python tools/sui/test_sui.py
+# 插件层：工具名 ↔ 命令行契约、包结构
+node dsh-sui/test/contract.mjs
+```
+
+## 已知限制
+
+- **旁听者和我是同一支模型时挡不住长期偏好**。挡得住临时挑词。换模型做旁听能缓解。
+- **一个库只能长出一张脸**。混着两个人的记录，人格就是两张脸搅在一起。记录带 `owner` 分开写，别混。
+- **相关性机器验不了**。挂一条不相干的记录，字面校验只在几乎一个字都不沾时提醒（`_overlap < 0.10`），剩下还得人看。
+- **语气表是手写的**。26 个词配 26 句话，是我的意愿清单，不是从数据里长出来的。

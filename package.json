@@ -1,0 +1,42 @@
+{
+  "name": "dsh-sui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "穗：三层记忆——记录 / 记忆 / 感觉。带读写工具、每轮自动想起，和一个看人格的面板。",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "memory",
+    "act-r"
+  ],
+  "main": "lib/index.mjs",
+  "exports": {
+    ".": "./lib/index.mjs",
+    "./client": "./lib/client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.mjs",
+    "lib/client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true
+    }
+  },
+  "engines": {
+    "dsh": ">=0.2.0"
+  },
+  "license": "MIT",
+  "icon": "./icon.svg"
+}

@@ -1,0 +1,23 @@
+# dsh-sui bundle patch —— 一行 insert，把「穗」挂进预设。
+#
+# 想改路径就在 profile 自己的 cordis.patch.yml 里覆盖同 id 的行，
+# 不要在这里再 insert 一次（同一 id 出现两行会被 compose 自检拒绝）。
+
+- insert:
+    - id: sui
+      name: dsh-sui
+      config:
+        workspace: 'D:/Users/张锴/Documents/deepseek-harness/default-workspace'
+        python: 'C:/Users/张锴/.dsh/dsh-runtimes/dsh-primary-runtime/dependencies/python/python.exe'
+        presets:
+          - daughter-agent
+          # 普通会话也带上：不然在标准预设里聊天，记忆永远浮不上来，
+          # 只能靠手动 sui_load（2026-11-06 补）
+          - standard
+        scopeWorkspaces:
+          # 空 = 不限工作区。多实例要用这个：
+          # 每个工作区的会话各用各的库（绑了就用绑的，没绑就用自己目录的，
+          # 自己目录也没有就退回下面这个主库）。
+          []
+          # 想反过来只限死几个目录，就把它们列在这里：
+          # - 'D:/Users/张锴/Documents/deepseek-harness/default-workspace'

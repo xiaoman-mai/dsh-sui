@@ -1,0 +1,22 @@
+# 依赖和产物
+node_modules/
+pnpm-lock.yaml
+
+# 备份和临时文件
+*.bak
+*.bak-*
+*.orig
+*.log
+.DS_Store
+Thumbs.db
+
+# 数据：库和它的备份不进仓库（自己的记忆不该跟着代码走）
+*.db
+*.db-wal
+*.db-shm
+backups/
+snapshots/
+
+# 编辑器
+.vscode/
+.idea/
