@@ -353,6 +353,12 @@ def cmd_fact(a):
     q = f'  ｜原文：{a.quote[:40]}…' if a.quote and len(a.quote) > 40 else (f'  ｜原文：{a.quote}' if a.quote else '')
     who_tag = '' if who == 'me' else f'  〔{who}〕'
     print(f"记录 #{cur.lastrowid}  [{LEVEL_NAMES[w]}]  {a.text}{q}{who_tag}")
+    if not a.quote:
+        # 转述却没存原话，就是以后回查时落空的那一批（2026-11-07 数出来占四成）。
+        # 当场提一句，比事后想补便宜得多。
+        marks = ('说', '告诉', '讲', '问', '答', '回', '称', '留言', '评论')
+        if any(m in a.text for m in marks):
+            print('  〔没存原话〕这条听着像转述。以后要拿它替谁说话，回查只能回到我这句概括；带上 quote 能省这一层。')
 
 
 def cmd_day(a):
