@@ -385,7 +385,12 @@ def cmd_show(a):
 
 
 def _fact_source_block(c, fid):
-    """把一条记录摊成「我记的 / 原文 / 出处」。不存在返回 False。"""
+    """把一条记录摊成「我记的 / 抄本 / 可核的源」。不存在返回 False。
+
+    抄本和源是两回事（小绒 2026-11-06 在 rice-bowl#173 指出的）：
+    回查如果只回到我自己的笔记，只会越查越对——笔记不会反驳我。
+    所以这里把「源」单独列出来，源到不了的时候明说。
+    """
     r = c.execute('SELECT * FROM facts WHERE id=?', (fid,)).fetchone()
     if not r:
         return False
@@ -393,11 +398,13 @@ def _fact_source_block(c, fid):
     print(f"  [{r['id']}] {r['day']}  {LEVEL_NAMES.get(r['weight'], r['weight'])}{flag}")
     print(f"        我记的：{r['text']}")
     if r['quote']:
-        print(f"        原  文：{r['quote']}")
+        print(f"        抄  本：{r['quote']}")
     else:
-        print("        原  文：（没存——这条只有我的概括）")
+        print("        抄  本：（没存原话——这条只有我的概括，不能当依据）")
     if r['source']:
-        print(f"        出  处：{r['source']}")
+        print(f"        可核的源：{r['source']}")
+    else:
+        print("        可核的源：（没写——这条回不去了，别当依据）")
     return True
 
 
@@ -406,9 +413,13 @@ def cmd_quote(a):
 
     这是「总结只是索引、不是依据」那一步的落点：要替别人转述之前先调它，
     看到原文再开口；原文撑不住那句话，就把话说轻，或者不说。
+
+    但抄本不是源头：抄的时候挑过什么，事后看不见。所以源要单独列，
+    源到不了就别拿它当依据——这一层是 rice-bowl#173 里小绒和肥鱼补的。
     """
     c = conn()
     ids = [int(x) for x in str(a.ids).replace('，', ',').split(',') if x.strip()]
+    print('—— 回查：抄本是我抄的，源才是能核的；源到不了，就别拿这条当依据 ——')
     for i in ids:
         m = c.execute('SELECT * FROM memories WHERE id=?', (i,)).fetchone()
         if m:
