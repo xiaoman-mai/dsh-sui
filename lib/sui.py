@@ -553,8 +553,9 @@ def cmd_memory(a):
     feels = parse_feels(a.feel)
     c = conn()
     weak = []
+    no_quote = []
     for i in ids:
-        row = c.execute('SELECT text, quote FROM facts WHERE id=? AND retracted=0', (i,)).fetchone()
+        row = c.execute('SELECT text, quote, source FROM facts WHERE id=? AND retracted=0', (i,)).fetchone()
         if not row:
             sys.exit(f'拒绝：fact #{i} 不存在或已作废。')
         # 相关性只提醒、不拦：机器比的是字面，真挂错的还得人看。
@@ -562,6 +563,10 @@ def cmd_memory(a):
         o = _overlap(a.text, (row['text'] or '') + (row['quote'] or ''))
         if o < 0.10:
             weak.append((i, round(o, 3)))
+        # 肥鱼那条（rice-bowl#173）：摊开要在写之前——一条一条问「原话在哪」，
+        # 摊不出来的当场划掉，不留到落笔之后再发现。这里就摊一次。
+        if not (row['quote'] or '').strip():
+            no_quote.append(i)
     # 诞生那一下也算「想起过一次」：流水记一笔，计数就得跟着算，
     # 不然 load_count 永远比流水少一（2026-11-06 修）
     cur = c.execute('INSERT INTO memories (text, created, last_loaded, load_count, state) VALUES (?,?,?,?,?)',
@@ -588,6 +593,11 @@ def cmd_memory(a):
     c.commit()
     print(f"记忆 #{mid}  {a.text}")
     print(f"  证据 {ids} ｜ 我挑的词 {'、'.join(k for k, _ in feels)}  ｜ 状态：等旁听")
+    if no_quote:
+        if len(no_quote) == len(ids):
+            print('  ⚠ 这几条证据一条原话都没有——这条落笔时就没有可核的东西，以后只能回到我这句概括。')
+        else:
+            print(f'  · 这几条只有我的概括，没有原话：{no_quote}（有原话的 {len(ids) - len(no_quote)} 条）')
     if weak:
         print(f"  ⚠ 这几条证据跟这段字几乎不沾边：{weak}")
         print('    机器只比字面，抽象的说法常会这样；但真要挂错了，趁状态还没定，现在改还来得及。')
