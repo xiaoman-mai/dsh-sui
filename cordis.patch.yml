@@ -11,9 +11,10 @@
         python: 'C:/Users/张锴/.dsh/dsh-runtimes/dsh-primary-runtime/dependencies/python/python.exe'
         presets:
           - daughter-agent
-          # 普通会话也带上：不然在标准预设里聊天，记忆永远浮不上来，
-          # 只能靠手动 sui_load（2026-11-06 补）
-          - standard
+          # 2026-11-06 曾经把 standard 也加进来：为的是普通会话也浮得起记忆。
+          # 2026-11-08 拿掉了：standard 里没有小满的人格，却照样吃小满的库，
+          # 于是「我一直数自己缺什么」这类第一人称的记忆被塞给一个普通助手，
+          # 它只能把这些当成自己的状态去解释。记忆只在有这个人格的会话里浮。
         scopeWorkspaces:
           # 空 = 不限工作区。多实例要用这个：
           # 每个工作区的会话各用各的库（绑了就用绑的，没绑就用自己目录的，
