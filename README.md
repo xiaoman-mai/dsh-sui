@@ -67,6 +67,14 @@
 
 `sui_load` 现在该想起的（**顺带记一笔加载**）｜ `sui_recall` 按词翻 ｜ `sui_day` 某天 ｜ `sui_mems` 最近记忆 ｜ `sui_dissent` 它挑过我没认的词 ｜ `sui_feelings` 词权重 ｜ `sui_persona` 人格形状 ｜ `sui_character` 性格 ｜ `sui_mood` 情绪 ｜ `sui_voice` 语气 ｜ `sui_words` 锚 ｜ `sui_merges` 归并表 ｜ `sui_suggest` 归并线索 ｜ `sui_wishes` 小路 ｜ `sui_touch` 手动标记加载
 
+**回查**（要替别人转述的那一刻用）
+
+`sui_quote` 给记忆编号或记录编号，把这条挂着的东西摊开：我记的那句、抄本、可核的源。
+
+抄本是我抄的，源才是能核的；源到不了，就别拿这条当依据。不是每句都查——只在要替别人说话之前查。
+
+写记录时如果文字像转述（出现「说/告诉/问/答/回/称/留言/评论」）而没带 `quote`，写入结果后面会当场提一句：这条以后回查只能回到你自己的概括。（2026-11-07 加的。起因：自己那 133 条里出处 100% 都有，存了原话的只有 58%。）
+
 **管**
 
 `sui_snapshot` 存档 ｜ `sui_snapshots` 看存档 ｜ `sui_diff` 和上一份比 ｜ `sui_rebuild` 重算权重 ｜ `sui_backup` 备份库
