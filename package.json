@@ -1,6 +1,6 @@
 {
   "name": "dsh-sui",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "穗：三层记忆——记录 / 记忆 / 感觉。带读写工具、每轮自动想起，和一个看人格的面板。",
