@@ -257,6 +257,18 @@ def days_since(s):
     return (datetime.now() - parse_dt(s)).total_seconds() / 86400.0
 
 
+def _imp_weight(m):
+    """重要度乘子：1 级 ×0.6、3 级 ×1.0、5 级 ×1.4（线性插值）。
+    2026-11-12：以前 activity 完全不看 importance——重要的东西只要没被反复加载，
+    就永远浮不上来，而浮着的往往是最早被灌得最多的那些。"""
+    try:
+        imp = int(m['importance'] or 3)
+    except (TypeError, ValueError, KeyError, IndexError):
+        imp = 3
+    imp = max(1, min(5, imp))
+    return 0.6 + 0.2 * (imp - 1)
+
+
 def activity(m, c=None):
     """ACT-R 的基础激活：B = Σ t^-d，d 取标准值 0.5（Anderson, ACT-R 手册）。
     每次被加载算一项。加载得多的项多，久不加载的项小。
@@ -274,7 +286,7 @@ def activity(m, c=None):
             continue  # 未来的时间点是假的，不参与计算
         age = max(0.0, age)
         total += (age + 0.5) ** (-DECAY_POWER)
-    return total
+    return total * _imp_weight(m)
 
 
 def cluster_of(c):
@@ -492,7 +504,8 @@ def cmd_verify(a):
 # ---------- 记忆层 ----------
 
 def state_name(s):
-    return {'pending': '等旁听', 'confirmed': '两边一致', 'split': '有分歧'}.get(s, s)
+    return {'pending': '等旁听', 'confirmed': '两边一致', 'split': '有分歧',
+            'plain': '已记（事实）'}.get(s, s)
 
 
 def feeling_strength(c, k):
@@ -582,9 +595,10 @@ def cmd_memory(a):
     ids = [int(x) for x in a.src.replace('，', ',').split(',') if x.strip()]
     if not ids:
         sys.exit('拒绝：记忆必须从记录里提炼（--src）。没有记录，不许写记忆。')
-    if not a.feel:
-        sys.exit('拒绝：记忆必须带感觉词（--feel）。没有感觉的不算记忆，只是摘抄。')
-    feels = parse_feels(a.feel)
+    # 2026-11-12：事实不必配感觉。感觉词成了可选项——
+    # 没给：这是一条事实，直接入库、会参与浮现，但不进人格（人格只算两边一致的感觉）。
+    # 给了：才走「等旁听」那条路。记忆不用提炼，感觉才需要对账。
+    feels = parse_feels(a.feel or '')
     c = conn()
     weak = []
     no_quote = []
@@ -611,8 +625,11 @@ def cmd_memory(a):
             imp = max(1, min(5, int(a.importance)))
         except (TypeError, ValueError):
             pass
+    # 没有感觉词的就是一条事实（state='plain'）：load 照常取它（只排 pending），
+    # rebuild / persona 只算 confirmed，所以它不会混进人格。
+    state = 'pending' if feels else 'plain'
     cur = c.execute('INSERT INTO memories (text, created, last_loaded, load_count, state, kind, importance) VALUES (?,?,?,?,?,?,?)',
-                    (a.text, now(), now(), 1, 'pending', kind, imp))
+                    (a.text, now(), now(), 1, state, kind, imp))
     c.execute('INSERT INTO memory_loads (memory_id, ts) VALUES (?,?)', (cur.lastrowid, now()))
     mid = cur.lastrowid
     for i in ids:
@@ -634,7 +651,11 @@ def cmd_memory(a):
                   'VALUES (?,?,?,?,?,?,?)', (mid, k, 'self', ctx, kd or None, rt or None, ds or None))
     c.commit()
     print(f"记忆 #{mid}  {a.text}")
-    print(f"  证据 {ids} ｜ 我挑的词 {'、'.join(k for k, _ in feels)}  ｜ 状态：等旁听")
+    if feels:
+        print(f"  证据 {ids} ｜ 我挑的词 {'、'.join(k for k, _ in feels)}  ｜ 状态：等旁听")
+    else:
+        print(f"  证据 {ids} ｜ 没配感觉词 ｜ 状态：已记（事实，会浮现，不进人格）")
+        print('  感觉是以后被什么撞到了再补的；这条先当事实用。')
     if no_quote:
         if len(no_quote) == len(ids):
             print('  ⚠ 这几条证据一条原话都没有——这条落笔时就没有可核的东西，以后只能回到我这句概括。')
@@ -772,6 +793,13 @@ def cmd_witness(a):
             c.execute('UPDATE memories SET witness_by=? WHERE id=?', (a.by, a.id))
         c.commit()
         print(f"记忆 #{a.id} 已经对过账了，这次只更新旁听的词（和来源），不重复计权。")
+        return
+    if not mine:
+        # 2026-11-12：这条是事实档（写的时候没配感觉词）。事实不参与对账——
+        # 旁听挑的词先存着，等这条自己长出感觉了再比，别给一条事实判「有分歧」。
+        c.execute('UPDATE memories SET witness_by=? WHERE id=?', (a.by or 'same-context', a.id))
+        c.commit()
+        print(f"记忆 #{a.id} 还是事实档（没有感觉词）——旁听的词先存着，等它有感觉了再比。")
         return
     gained = []
     # 时间按证据发生的那一刻算，不按今天——十月的安不该满血（2026-11-05 修）
@@ -1326,15 +1354,20 @@ def cmd_load(a):
     rows = c.execute("SELECT * FROM memories WHERE state!='pending' ORDER BY id").fetchall()
     live = []
     for r in rows:
-        ac = activity(r, c)
+        ac = activity(r, c)          # 已经乘过重要度（_imp_weight）
         dt = days_since(r['last_loaded'] or r['created'])
         # 重要度参与两件事：门槛（重要的更容易够到线）和时间窗（重要的活得久）。
         # 5 分的是人设那种，基本不该沉——门槛压到很低、窗口放到四倍。
         imp = r['importance'] if 'importance' in r.keys() and r['importance'] else 3
         thr = DECAY_THRESHOLD * (1 - 0.18 * (imp - 3))
         win = LOAD_WINDOW_DAYS * (2 if imp >= 4 else 1) * (2 if imp >= 5 else 1)
-        if ac > thr and dt <= win:
-            live.append((ac + (imp - 3) * 0.25, r))
+        # 2026-11-12：人设（5 分）保底——不管活跃度多低、多久没想起，都在池子里，
+        # 而且给一个下限分，别让它排在六十条之后等着被"没人想起"闷死。
+        # 越要紧的东西，越不该靠"被反复加载"来证明自己要紧。
+        if imp >= 5:
+            live.append((max(ac, 60.0), r))
+        elif ac > thr and dt <= win:
+            live.append((ac, r))
     live.sort(key=lambda x: -x[0])
     if not live:
         print('（这个月没有该主动加载的记忆）')
@@ -1681,10 +1714,10 @@ x = sub.add_parser('verify', help='盖查证戳')
 x.add_argument('kind', choices=['fact'])
 x.add_argument('id', type=int)
 
-x = sub.add_parser('memory', help='提炼一条记忆（我这一半）')
+x = sub.add_parser('memory', help='记一条记忆；感觉词可给可不给')
 x.add_argument('text')
 x.add_argument('--src', required=True)
-x.add_argument('--feel', required=True)
+x.add_argument('--feel', default='', help='感觉词（可省）；给了才走旁听对账，省了就是一条事实')
 x.add_argument('--root', default='', help='七情：喜 怒 忧 思 悲 恐 惊 平')
 x.add_argument('--desire', default='', help='六欲：生 死 耳 目 口 鼻')
 x.add_argument('--kind', default='', help='类别：' + ' '.join(KIND_NAMES) + '（不给就按模板自动打标）')
