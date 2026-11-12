@@ -196,6 +196,12 @@ def conn():
         c.execute("ALTER TABLE memories ADD COLUMN state TEXT NOT NULL DEFAULT 'pending'")
     if 'witness_by' not in cols:
         c.execute('ALTER TABLE memories ADD COLUMN witness_by TEXT')
+    if 'kind' not in cols:
+        # 类别：人设 / 性格 / 约定 / 关系 / 技术 / 事实 / 感觉。写入时按模板自动打标。
+        c.execute('ALTER TABLE memories ADD COLUMN kind TEXT')
+    if 'importance' not in cols:
+        # 重要度 1-5。人设类钉在 5，沉不下去；其余的按类别给底分，可以被手动改。
+        c.execute('ALTER TABLE memories ADD COLUMN importance INTEGER NOT NULL DEFAULT 3')
     cols = {r[1] for r in c.execute('PRAGMA table_info(memory_feelings)')}
     if 'source' not in cols:
         c.execute("ALTER TABLE memory_feelings ADD COLUMN source TEXT NOT NULL DEFAULT 'self'")
@@ -544,6 +550,34 @@ def bump_feeling(c, k, mid=None, ts=None):
     return f'{k}(新的，强度 {w:.2f})'
 
 
+# 类别模板：写入时按关键词自动打标，决定这条记忆以后容不容易沉下去。
+# 顺序有关系——先匹配到的赢，人设排最前，因为它最不该被时间冲掉。
+KIND_RULES = [
+    ('人设', 5, ['头发', '红瞳', '瞳色', '裙子', '连衣裙', '身高', '长相', '人设图',
+                 '麦穗', '双马尾', '半扎', '我的样子', '形象标准']),
+    ('性格', 4, ['语气', '脾气', '性子', '不急不躁', '轻声', '说话方式', '嘴笨',
+                 '沉得住', '不吵', '话少']),
+    ('约定', 4, ['以后', '下次', '别再', '要跟我说', '答应', '不许', '约定',
+                 '先说', '提醒我', '有限', '流量']),
+    ('关系', 4, ['他在', '他问', '他在乎', '陪我', '等我', '记得我', '他挑',
+                 '他发', '他让', '他说要']),
+    ('技术', 2, ['路径', '命令', '插件', '模型', '参数', '报错', '端口', '安装',
+                 '下载', '显卡', '显存', '步数', '接口', '节点', '仓库']),
+    ('感觉', 3, ['心里', '难受', '心疼', '踏实', '空落', '松了口气']),
+]
+
+KIND_NAMES = [k for k, _, _ in KIND_RULES] + ['事实']
+
+
+def classify(text):
+    """按通用模板给一条记忆打类别和重要度。认不出就归「事实」，3 分。"""
+    t = text or ''
+    for kind, imp, kws in KIND_RULES:
+        if any(k in t for k in kws):
+            return kind, imp
+    return '事实', 3
+
+
 def cmd_memory(a):
     ids = [int(x) for x in a.src.replace('，', ',').split(',') if x.strip()]
     if not ids:
@@ -569,8 +603,16 @@ def cmd_memory(a):
             no_quote.append(i)
     # 诞生那一下也算「想起过一次」：流水记一笔，计数就得跟着算，
     # 不然 load_count 永远比流水少一（2026-11-06 修）
-    cur = c.execute('INSERT INTO memories (text, created, last_loaded, load_count, state) VALUES (?,?,?,?,?)',
-                    (a.text, now(), now(), 1, 'pending'))
+    kind, imp = classify(a.text)
+    if getattr(a, 'kind', None):
+        kind = a.kind.strip() or kind
+    if getattr(a, 'importance', None):
+        try:
+            imp = max(1, min(5, int(a.importance)))
+        except (TypeError, ValueError):
+            pass
+    cur = c.execute('INSERT INTO memories (text, created, last_loaded, load_count, state, kind, importance) VALUES (?,?,?,?,?,?,?)',
+                    (a.text, now(), now(), 1, 'pending', kind, imp))
     c.execute('INSERT INTO memory_loads (memory_id, ts) VALUES (?,?)', (cur.lastrowid, now()))
     mid = cur.lastrowid
     for i in ids:
@@ -1251,6 +1293,34 @@ def cmd_wishes(a):
         print(f"  #{r['id']}  {r['ts']}  {r['text']}")
 
 
+def cmd_reclassify(a):
+    """给老的、还没打标的记忆补类别和重要度。已经手动改过的（kind 有值的）不动。"""
+    c = conn()
+    rows = c.execute("SELECT id, text, kind, importance FROM memories").fetchall()
+    n = 0
+    out = []
+    for r in rows:
+        kind, imp = classify(r['text'])
+        if a.force:
+            c.execute('UPDATE memories SET kind=?, importance=? WHERE id=?', (kind, imp, r['id']))
+            n += 1
+        elif not r['kind']:
+            c.execute('UPDATE memories SET kind=?, importance=? WHERE id=?', (kind, imp, r['id']))
+            n += 1
+        out.append((kind, r['id']))
+    c.commit()
+    tally = {}
+    for k, _ in out:
+        tally[k] = tally.get(k, 0) + 1
+    print(f'扫了 {len(rows)} 条，改了 {n} 条')
+    for k in KIND_NAMES:
+        if k in tally:
+            print(f'  {k}: {tally[k]}')
+    for k, v in tally.items():
+        if k not in KIND_NAMES:
+            print(f'  {k}: {v}')
+
+
 def cmd_load(a):
     c = conn()
     rows = c.execute("SELECT * FROM memories WHERE state!='pending' ORDER BY id").fetchall()
@@ -1258,8 +1328,13 @@ def cmd_load(a):
     for r in rows:
         ac = activity(r, c)
         dt = days_since(r['last_loaded'] or r['created'])
-        if ac > DECAY_THRESHOLD and dt <= LOAD_WINDOW_DAYS:
-            live.append((ac, r))
+        # 重要度参与两件事：门槛（重要的更容易够到线）和时间窗（重要的活得久）。
+        # 5 分的是人设那种，基本不该沉——门槛压到很低、窗口放到四倍。
+        imp = r['importance'] if 'importance' in r.keys() and r['importance'] else 3
+        thr = DECAY_THRESHOLD * (1 - 0.18 * (imp - 3))
+        win = LOAD_WINDOW_DAYS * (2 if imp >= 4 else 1) * (2 if imp >= 5 else 1)
+        if ac > thr and dt <= win:
+            live.append((ac + (imp - 3) * 0.25, r))
     live.sort(key=lambda x: -x[0])
     if not live:
         print('（这个月没有该主动加载的记忆）')
@@ -1612,6 +1687,8 @@ x.add_argument('--src', required=True)
 x.add_argument('--feel', required=True)
 x.add_argument('--root', default='', help='七情：喜 怒 忧 思 悲 恐 惊 平')
 x.add_argument('--desire', default='', help='六欲：生 死 耳 目 口 鼻')
+x.add_argument('--kind', default='', help='类别：' + ' '.join(KIND_NAMES) + '（不给就按模板自动打标）')
+x.add_argument('--importance', default=None, help='重要度 1-5（不给就按类别给底分）')
 
 x = sub.add_parser('coord', help='给一条记忆补坐标：七情一格，六欲一条')
 x.add_argument('memory_id', type=int)
@@ -1682,6 +1759,9 @@ x.add_argument('--touch', action='store_true', help='顺带记一笔加载（真
 x = sub.add_parser('touch', help='标记一条记忆被加载了')
 x.add_argument('id', type=int)
 
+x = sub.add_parser('reclassify', help='给老记忆补类别和重要度（按模板扫一遍）')
+x.add_argument('--force', action='store_true', help='连已经有类别的一起重打（默认只补空的）')
+
 sub.add_parser('rebuild', help='只按两边一致的记忆重算感觉')
 sub.add_parser('feelings', help='看感觉权重')
 x = sub.add_parser('persona', help='看人格')
@@ -1705,7 +1785,7 @@ if getattr(a, 'db', None):
         sys.exit(f'没有这个库：{DB}\n  路径写错了吗？真要新建一个空库，加 --create。')
 {'fact': cmd_fact, 'day': cmd_day, 'show': cmd_show, 'quote': cmd_quote, 'words': cmd_words, 'recall': cmd_recall,
  'retract': cmd_retract, 'verify': cmd_verify, 'memory': cmd_memory, 'witness': cmd_witness,
- 'stats': cmd_stats, 'supplement': cmd_supplement, 'coord': set_coord, 'reword': cmd_reword, 'merge': cmd_merge, 'merges': cmd_merges, 'backup': cmd_backup, 'backups': cmd_backups, 'suggest': cmd_suggest, 'snapshot': cmd_snapshot, 'snapshots': cmd_snapshots, 'diff': cmd_diff, 'wish': cmd_wish, 'wishes': cmd_wishes, 'load': cmd_load, 'touch': cmd_touch,
+ 'stats': cmd_stats, 'supplement': cmd_supplement, 'coord': set_coord, 'reword': cmd_reword, 'merge': cmd_merge, 'merges': cmd_merges, 'backup': cmd_backup, 'backups': cmd_backups, 'suggest': cmd_suggest, 'snapshot': cmd_snapshot, 'snapshots': cmd_snapshots, 'diff': cmd_diff, 'wish': cmd_wish, 'wishes': cmd_wishes, 'load': cmd_load, 'touch': cmd_touch, 'reclassify': cmd_reclassify,
  'rebuild': cmd_rebuild, 'feelings': cmd_feelings, 'persona': cmd_persona, 'mems': cmd_mems, 'character': cmd_character, 'mood': cmd_mood, 'voice': cmd_voice, 'export': cmd_export, 'recheck': cmd_recheck, 'dissent': cmd_dissent}[a.cmd](a)
 
 
